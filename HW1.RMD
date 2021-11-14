@@ -1,0 +1,389 @@
+---
+title: "Multivariable Analysis HW-1"
+author: "工管四 B06701235 黃亞婕"
+date: "2021/03/14"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 4
+    number_sections: false
+    toc_float: true
+---
+```{r, message = FALSE, results='hide'}
+library(rstan)
+library(rethinking)
+library(splines)
+```
+## Q1.
+#### 1.
+```{r}
+p_grid = seq(from=0, to=1, length.out=1000)
+prob_p = 1
+likelihood <- dbinom(3, size = 3, prob = p_grid)
+un_std_posterior <- prob_p * likelihood
+posterior <- un_std_posterior / sum(un_std_posterior)
+plot(p_grid, posterior, type = "l", xlab = "probability of water", ylab = "posterior probability")
+mtext("(1) W, W, W ")
+```
+
+#### 2.
+```{r}
+p_grid = seq(from=0, to=1, length.out=1000)
+prob_p = 1
+likelihood <- dbinom(3, size = 4, prob = p_grid)
+un_std_posterior <- prob_p * likelihood
+posterior <- un_std_posterior / sum(un_std_posterior)
+plot(p_grid, posterior, type = "l", xlab = "probability of water", ylab = "posterior probability")
+mtext("(2) W, W, W, L ")
+```
+
+#### 3.
+```{r}
+p_grid = seq(from=0, to=1, length.out=1000)
+prob_p = 1
+likelihood <- dbinom(5, size = 7, prob = p_grid)
+un_std_posterior <- prob_p * likelihood
+posterior <- un_std_posterior / sum(un_std_posterior)
+plot(p_grid, posterior, type = "l", xlab = "probability of water", ylab = "posterior probability")
+mtext("(3) L, W, W, L, W, W, W ")
+```
+
+## Q2.
+#### 1.
+```{r}
+p_grid = seq(from=0, to=1, length.out=1000)
+prob_p = ifelse(p_grid < 0.5, 0, 1)
+likelihood <- dbinom(3, size = 3, prob = p_grid)
+un_std_posterior <- prob_p * likelihood
+posterior <- un_std_posterior / sum(un_std_posterior)
+plot(p_grid, posterior, type = "l", xlab = "probability of water", ylab = "posterior probability")
+mtext("(1) W, W, W ")
+```
+
+#### 2.
+```{r}
+p_grid = seq(from = 0, to = 1, length.out = 1000)
+prob_p = ifelse(p_grid < 0.5, 0, 1)
+likelihood <- dbinom(3, size = 4, prob = p_grid)
+un_std_posterior <- prob_p * likelihood
+posterior <- un_std_posterior / sum(un_std_posterior)
+plot(p_grid, posterior, type = "l", xlab = "probability of water", ylab = "posterior probability")
+mtext("(2) W, W, W, L ")
+```
+
+#### 3.
+```{r}
+p_grid = seq(from = 0, to = 1, length.out = 1000)
+prob_p = ifelse(p_grid < 0.5, 0, 1)
+likelihood <- dbinom(5, size = 7, prob = p_grid)
+un_std_posterior <- prob_p * likelihood
+posterior <- un_std_posterior / sum(un_std_posterior)
+plot(p_grid, posterior, type = "l", xlab = "probability of water", ylab = "posterior probability")
+mtext("(3) L, W, W, L, W, W, W ")
+```
+
+## Q3. 
+#### - Without Birth Data
+
+```{r}
+likelihood <- c(0.8, 1 - 0.65)
+prior = 0.5
+unstd_post <- prior * likelihood
+posterior<- unstd_post / sum(unstd_post)
+posterior[1]
+```
+The posterior probability that your panda is species A is **0.6956522**.
+
+#### - With Birth Data
+
+此題需使用其他題目的數據，故由前幾題的數據先算出其 prior，再利用 prior 算出考慮 Birth Data 後的 posterior。
+
+```{r}
+p_A = 0.1
+p_B = 0.2
+
+likelihood <- c(
+  p_A * (1 - p_A),
+  p_B * (1 - p_B)
+)
+
+prior <- posterior
+unstd_posterior2 <- prior * likelihood
+posterior_2 <- unstd_posterior2 / sum(unstd_posterior2)
+posterior_2[1]
+```
+After redoing the calculation, the posterior probability changed to  **0.5625**.
+
+## Q4.
+首先使用 birth1 和 birth2 計算出 boys 出現的 posterior probability。再利用`sample() ` 函數對母體進行抽樣，並以`rbinom()`函數模擬 10000 replicates of 200 births，最後使用`dens()`來畫出 simulate birth 的分佈，並觀察其與 actual count (111 boys) 的關係。
+```{r}
+birth1 <- c(1,0,0,0,1,1,0,1,0,1,0,0,1,1,0,1,1,0,0,0,1,0,0,0,1,0,
+            0,0,0,1,1,1,0,1,0,1,1,1,0,1,0,1,1,0,1,0,0,1,1,0,1,0,0,0,0,0,0,0,
+            1,1,0,1,0,0,1,0,0,0,1,0,0,1,1,1,1,0,1,0,1,1,1,1,1,0,0,1,0,1,1,0,
+            1,0,1,1,1,0,1,1,1,1)
+birth2 <- c(0,1,0,1,0,1,1,1,0,0,1,1,1,1,1,0,0,1,1,1,0,0,1,1,1,0,
+            1,1,1,0,1,1,1,0,1,0,0,1,1,1,1,0,0,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,
+            1,1,1,0,1,1,0,1,1,0,1,1,1,0,0,0,0,0,0,1,0,0,0,1,1,0,0,1,0,0,1,1,
+            0,0,0,1,1,1,0,0,0,0)
+
+num_boys = sum(birth1) + sum(birth2)
+size = length(birth1) + length(birth2)
+
+p_grid <- seq(from = 0, to = 1, length.out = 1000) 
+prior = 1
+likelihood <- dbinom(num_boys, size, prob = p_grid) 
+unstd_posterior <- likelihood * prior 
+posterior <- unstd_posterior / sum(unstd_posterior) 
+
+samples <- sample(p_grid, prob = posterior, size = 10000, replace = TRUE)
+simulate <- rbinom(10000, size = 200, samples)
+dens(simulate)
+abline(v = 111 , col = "red")
+```
+
+The observed number of boys (紅色的直線) 在我們畫出的predicted numbers of boys 模型中非常接近其平均數，此模型 fits the observed data well。
+
+## Q5. 
+```{r}
+num_boys_1 = sum(birth1)
+size_1 = length(birth1) 
+
+p_grid <- seq(from = 0, to = 1, length.out = 1000) 
+prior_1 = 1
+likelihood_1 <- dbinom(num_boys_1, size_1, prob = p_grid) 
+unstd_posterior_1 <- likelihood_1 * prior_1 
+posterior_1 <- unstd_posterior_1 / sum(unstd_posterior_1) 
+
+samples <- sample(p_grid, prob = posterior_1, size = 10000, replace = TRUE)
+simulate_1 <- rbinom(10000, size = 100, samples)
+dens(simulate_1)
+abline(v = num_boys_1, col = "red")
+```
+
+新的 observed number of boys (紅色的直線) 在我們畫出的 predicted numbers of boys 模型中雖然有稍微向左偏，但同樣很接近其平均數，故此模型也 fits the observed data well。
+
+## Q6.
+
+```{r}
+# Count the number of first borns who were girls and simulate 10,000 times.
+num_girls = sum(birth1 == 0)
+sim_girl = rbinom(10000, size = num_girls, prob = samples)
+dens(sim_girl)
+
+#  Compare the counts of boys to the actual observed count of boys following girls.
+girl_boy <- sum(birth2 [ birth1 == 0 ])
+abline(v = girl_boy, col = "red")
+```
+
+模型低估了第一胎是女嬰後的第二胎為男嬰的數量，預測值和實際狀況偏離許多，可知此模型 doesn't fit，故可推測第一胎和第二胎的性別並非獨立。
+
+以下有兩種推論：
+
+* data 有 bias：可能受到社會文化的影響（重男輕女），可能在第一胎為女生後因為想生男孩，再發現是女嬰時就進行墮胎，所以第二胎是男嬰的 event 比較多。
+* data 沒有 bias：生物學上可能真的「第一胎是男嬰，第二胎是女嬰」的機率較高。
+
+## Q7.
+#### part (a)
+
+The relationship between height (cm) and the natural logarithm of weight (log-kg). 
+
+```{r}
+data(Howell1)
+d <- Howell1
+
+interpret <- alist(
+  height ~ dnorm( mu, sigma ),
+  mu <- a + b * log(weight),
+  a ~ dnorm(178, 100),
+  b ~ dnorm(0, 100),
+  sigma ~ dunif(0, 50)
+  )
+m <- map(interpret, data = d)
+precis(m)
+```
+
+Interpretation:
+
+要以 β 來進行估計比較不直觀，因為我們是 log-kg 而非一般 kg 來計算。根據上述資料，每增加 1 log-kg 的重量，會增加 47 cm 的身高。
+
+#### part (b)
+
+```{r}
+plot( height ~ weight , data = Howell1 , col = col.alpha(rangi2,0.4) )
+
+# Calculate the predicted mean height and 97% interval for the mean and predicted height
+weight_seq <- seq(from = min(d$weight), to = max(d$weight), length.out = 30)
+mu <- link(m, data = data.frame(weight = weight_seq))
+
+mu_mean <- apply(mu , 2 , mean)
+mu_HPDI <- apply(mu , 2 , HPDI , prob = 0.97)
+sim_height <- sim(m, data = list(weight = weight_seq))
+height_HPDI <- apply(sim_height , 2 , HPDI, prob = 0.97)
+
+# Plot the predicted mean height and 97% interval for the mean
+lines(weight_seq, mu_mean)
+shade(mu_HPDI, weight_seq)
+
+# Plot the 97% interval for the predicted heights
+shade(height_HPDI , weight_seq)
+```
+
+## Q8.
+
+```{r}
+data("cherry_blossoms")
+d <- cherry_blossoms
+
+# 取 doy 和 temp 皆不為空值的
+d2 <- d[complete.cases(d), ]
+```
+
+#### Linear Model
+```{r}
+mean_temp <- mean(d2$temp)
+linear_model <- quap(
+  alist(
+    D ~ dnorm( mu, sigma ),
+    mu <- a + b * (temp-mean_temp) ,
+    a ~ dnorm( 100, 10 ),
+    b ~ dnorm( 0, 1 ),
+    sigma ~ dexp(1)
+  ), data = list(D = d2$doy, temp = d2$temp) 
+)
+
+# Calculate the predicted doy and 89% prediction interval
+temp_seq <- seq( from = min(d2$temp) , to = max(d2$temp) , length.out = 500)
+d3 <- list(temp = temp_seq)
+mu <- link( linear_model , data = d3)
+
+mu_mean <- apply(mu , 2 , mean )
+mu_PI <- apply(mu , 2 , PI , 0.89)
+doy_sim <- sim(linear_model , data = d3)
+doy_PI <- apply( doy_sim, 2, PI, 0.89)
+
+# Plot out the lines
+plot(d2$temp , d2$doy, col = col.alpha(rangi2, 0.5) , xlab = "Temperature",  ylab  = "Day of Year")
+lines( temp_seq , mu_mean)
+shade( mu_PI, temp_seq)
+shade( doy_PI , temp_seq)
+mtext("Linear Model")
+```
+
+#### Polynomial Model (Quadratic)
+
+```{r}
+# Standardize the predictor variable
+d2$temp_std <- (d2$temp - mean_temp) / sd(d2$temp)
+
+# Rewrite the Model
+d2$temp_std2 <- d2$temp_std^2
+qua_mdl <- quap(
+  alist(
+    D ~ dnorm( mu, sigma ),
+    mu <- a + b1*temp_std + b2*temp_std2,
+    a ~ dnorm( 100 , 10 ),
+    b1 ~ dnorm( 0 , 1 ),
+    b2 ~ dnorm(0 , 1),
+    sigma ~ dexp(1)
+  ), data=list(D = d2$doy, temp_std = d2$temp_std, temp_std2 = d2$temp_std2) 
+)
+
+# Calculate the predicted doy and 89% prediction interval
+temp_seq <- seq( from = min(d2$temp_std) , to = max(d2$temp_std) , length.out = 500)
+d4 <- list(temp_std = temp_seq , temp_std2 = temp_seq^2)
+mu <- link( qua_mdl , data = d4)
+
+mu_mean <- apply(mu , 2 , mean )
+mu_PI <- apply(mu , 2 , PI , prob = 0.89)
+doy_sim <- sim(qua_mdl , data = d4)
+doy_PI <- apply( doy_sim , 2 , PI , prob = 0.89)
+
+# Plot out the lines
+
+plot(doy ~ temp_std, data = d2, col = col.alpha(rangi2, 0.5), xlab = "Standardized Temperature", ylab = "Day of Year" )
+lines(temp_seq , mu_mean)
+shade( mu_PI , temp_seq)                                     
+shade( doy_PI , temp_seq) 
+mtext("Quadratic Model")
+```
+
+#### Spline Model
+```{r}
+data("cherry_blossoms")
+d <- cherry_blossoms
+
+
+d2 <- d[complete.cases(d), ]
+
+num_knots <- 15
+knot_list <- quantile( d2$temp, probs = seq(0, 1, length.out = num_knots ) )
+B <- bs(d2$temp, knots=knot_list[-c(1, num_knots)],degree=3, intercept=TRUE)
+
+spline_mdl <- quap(
+  alist(
+    D ~ dnorm( mu, sigma ),
+    mu <- a + B %*% w,
+    a ~ dnorm( 100, 10 ),
+    w ~ dnorm( 0, 10 ),
+    sigma ~ dexp(1)
+  ), 
+  data = list( D = d2$doy , B = B) ,
+  start = list( w = rep( 0 , ncol(B)))
+)
+
+mu <- link( spline_mdl , data = d2)
+mu_mean <- apply ( mu , 2 , mean )
+mu_PI <- apply ( mu , 2 , PI , prob = 0.89)
+doy_sim <- sim ( spline_mdl , data = d2)
+doy_PI <- apply( doy_sim , 2 , PI , prob = 0.89)
+
+res <- data.frame(cbind(d2$doy , mu_mean , d2$temp))
+res <- res[order(d2$temp), ]
+with(res, plot(V3 , V1 , col = col.alpha(rangi2, 0.5) , xlab = "Temperature", ylab = "Day of Year" ))  
+with(res , lines(V3 , mu_mean))
+mtext("Splines with 15 knots")
+```
+
+Interpretation:
+
+上述三張圖型可看出 linear 和 polynomial 下的模型較為相似，而spline 的 regression line 比較 wiggly ，其在 6°C 時有一個大幅度的波動。相比之下，linear model已經能清楚地表示出溫度和開花天數的負相關關係。
+
+## Q9.
+
+首先在維基百科搜尋 LDS population in the States 並加入 data `WaffleDivorce` ，後將此欄位進行標準化。其次，利用 data 建立 multiple regression model。
+
+```{r}
+data(WaffleDivorce)
+d <- WaffleDivorce
+
+d$LDS <- c(0.0077, 0.0458, 0.0600, 0.0107, 0.0191, 0.0261, 0.0045, 0.0058, 0.0045, 0.0075, 0.0082, 0.0530, 0.2586, 0.0045, 0.0068, 0.0090, 0.0132, 0.0080, 0.0064, 0.0082, 0.0072, 0.0041, 0.0045, 0.0059, 0.0073, 0.0118, 0.0473, 0.0130, 0.0065, 0.0038, 0.0331, 0.0043, 0.0085, 0.0152, 0.0054, 0.0124, 0.0364,0.0041, 0.0040, 0.0080, 0.0120, 0.0077, 0.0125, 0.6632, 0.0074, 0.0113, 0.0380, 0.0096, 0.0047, 0.1170)
+d$logLDS <- log(d$LDS)
+d$std_LDS <- (d$logLDS - mean(d$logLDS)) / sd(d$logLDS)
+
+mdl <- map(
+  alist(
+    Divorce ~ dnorm(mu,sigma),
+    mu <- a + bR*Marriage + bA*MedianAgeMarriage + bM*std_LDS,
+    a ~ dnorm(0,100),
+    bA ~ dnorm(0,10),
+    bR ~ dnorm(0,10),
+    bM ~ dnorm(0,10),
+    sigma ~ dunif(0,10)
+  ),
+  data=d )
+
+precis( mdl )
+```
+
+Interpretation：
+
+從上述資料可知LDS百分比與離婚率為負相關。婚姻的斜率變化很大，結婚年齡中位數和 LDS 人口百分比的斜率都是負的。因此，婚姻中位數年齡較高或摩門教徒百分比較高的州的離婚率較低。
+
+## Q10.
+
+* AIC :  *D$_{train}$ + 2p*，p 是在此模型中需要被預測的參數數目。
+* DIC :  *$\bar{D}$ + p$_{D}$ = $\bar{D}$ + ( $\bar{D}$ + $\hat{D}$ )* ，*$\bar{D}$* 是 posterior distribution of 偏差的平均，而 *$\hat{D}$* 是 posterior mean 的偏差。
+* WAIC :  -2( lppd - *p$_{WAIC}$*) = -2(  $\sum_{i=1}^{N} log Pr(y_i)$ - $\sum_{i=1}^{N} V(y_i)$) ， Pr(y$_{i}$)是 likelihood of observation 在training sample 中的平均，V(y$_{i}$) 是 log-likelihood 在 training sample 中的變異數。
+
+WAIC 是最 general 的 (WAIC > DIC > AIC)。若要轉為 DIC 須假設 posterior distribution 為 multivariate Gaussian 分佈；從 DIC 變 AIC，則要假設 prior 是 flat 的。三者皆需要有 in-sample training deviance 的估計與模型中 free parameters 數量的估計。
