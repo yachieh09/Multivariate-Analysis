@@ -1,0 +1,307 @@
+---
+title: "HW4"
+author: "工管四 B06701235 黃亞婕"
+date: "2021/04/23"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 4
+    number_sections: false
+    toc_float: true
+---
+```{r, message = FALSE, results='hide'}
+library(rstan)
+library(rethinking)
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(MASS)
+```
+
+### Q1.
+
+Only (3) is required. The Metropolis algorithm works when the probability of jumping from A to B is equal to the probability of jumping B to A and the proposal distribution is symmetric.
+
+### Q2.
+
+Gibbs sampling can estimate of the posterior with many fewer samples than a comparable Metropolis approach. It uses adaptive proposals and depends upon conjugated priors. If you hold other parameters constant, you can derive analytical solutions for the posterior distribution of an individual parameter. 
+
+The limitation is that when the model becomes more complex and contain lots of parameters, Gibbs sampling become inefficient. It will stuck in small regions of the posterior for a long time. Also, maybe you don’t want to use conjugate priors since some conjugate priors doesn't seem reasonable .
+
+### Q3.
+
+It can't handle discrete parameters since there is no slope for it to differentiate the space while sampling from the posterior distribution.
+
+### Q4.
+
+#### a) Rewrite the code
+
+Now we need to consider the population size when deciding our move, not the position.
+```{r}
+# island population
+island_pop <- sample(1:10)  
+
+num_weeks <- 100000
+positions <- rep(0, num_weeks)
+current <- 10 
+for (i in 1:num_weeks) {
+  positions[i] <- current
+
+  proposal <- current + sample( c(-1, 1), size=1) 
+  if ( proposal < 1 ) proposal <- 10
+  if ( proposal > 10 ) proposal <- 1
+  
+  prob_move <- island_pop[proposal] / island_pop[current]
+  current <- ifelse( runif(1) < prob_move , proposal, current)
+}
+```
+
+
+#### b) Plot out the results
+
+```{r, fig.width = 8 , fig.height = 4}
+par(mfrow = c(1,2))
+plot( (1:100) , positions[1:100] , xlab = "week", ylab = "island")
+plot(table(positions) , xlab = "island", ylab = "number of weeks")
+```
+
+We can see the position of the king every week and the time spent on each island is proportional to its population size.
+
+```{r, fig.width = 5 , fig.height = 5}
+f <- table(positions)
+plot( as.vector(f) , island_pop , type = "n" , xlab = "Frequency" , ylab = "Population" )
+text( x = f , y = island_pop )
+```
+
+Also from the plot above, we can see the index shuffle and the island appears in direct proportion to its population size in the samples.
+
+### Q5.
+
+#### a) Use Metropolis algorithm as model
+
+Modify the codes from textbook
+
+```{r, message = FALSE , results='hide'}
+N <- 5000
+p_samples <- rep(0 , N)
+p <- 0.5
+
+for ( i in 1:N ) {
+  p_samples[i] <- p
+  
+  proposal <- p + runif(1,-0.1,0.1)
+  if ( proposal > 1 ) 
+    proposal <- 1-(proposal-1)
+  if ( proposal < 0 ) 
+    proposal <- abs(proposal)
+
+  prop_current <- dbinom(6 , size = 9 , prob = p) * dunif( p , 0 , 1)
+  prop_proposal <- dbinom(6 , size = 9 , prob = proposal) * dunif( proposal , 0 , 1)
+  
+  prob_move = prop_proposal / prop_current
+  p <- ifelse( runif(1) < prob_move , proposal , p )
+}
+```
+
+#### b) Trace Plot
+
+Now we plot out the trace plot to see if the Markov Chain is healthy.
+```{r}
+plot( p_samples , type = "l" , ylab = "Probability of Water" )
+```
+
+由上圖看出此 MCMC 模型的表現良好，軌跡圖是平穩且 well mixing 的。
+
+#### c) Plot the posterior distribution
+
+```{r , message = FALSE }
+dens( p_samples , xlab = "Probability of Water" )
+curve( dbeta(x,7,4) , add = TRUE , col = "blue" )
+```
+
+We can see that the simple MCMC estimator performs good and it is similar to the exact analytic posterior.
+
+### Q6.
+
+The aggregated form of binomial data need to take the order into consideration, while disaggregated binomial counts don't care about orders. We would need to multiply an extra considering all the permutations when using aggregated binomial counts. 
+
+The multiplicity constant does influence the magnitude of the likelihood and log-likelihood, however, it isn’t a function of the parameter p so it won't have any impact on the inference.
+
+### Q7.
+
+```{r}
+exp(1.7)
+```
+
+This means when the corresponding predictor increases one unit, the proportional change in the odds of the outcome will be exp(1.7) = **5.4739**.
+
+### Q8.
+
+#### a) Load the Data
+```{r}
+# Construct dummy variables
+data(eagles)
+d = eagles
+d$P_dummy = ifelse(d$P == "L", 1, 0)
+d$V_dummy = ifelse(d$V == "L", 1, 0)
+d$A_dummy = ifelse(d$A == "A", 1, 0)
+```
+
+#### b) Model Fitting
+```{r, message = FALSE, results='hide', warning=FALSE}
+mdl8 = "
+data {
+    int N;
+    int Y[N];
+    int n[N];
+    int P[N];
+    int V[N];
+    int A[N];
+}
+parameters {
+    real alpha;
+    real bP;
+    real bV;
+    real bA;
+}
+transformed parameters {
+    real p[N];
+    for (i in 1:N){
+        p[i] = inv_logit(alpha + bP * P[i] + bV * V[i] + bA * A[i]);
+    }
+}
+model {
+    Y ~ binomial(n, p);
+    
+    alpha ~ normal(0, 1.5);
+    bP ~ normal(0, 0.5);
+    bV ~ normal(0, 0.5);
+    bA ~ normal(0, 0.5);
+}
+generated quantities {
+    vector[N] log_lik;
+    int pred_Y[N];
+    
+    for (i in 1:N){
+        log_lik[i] = binomial_lpmf(Y[i] | n[i] , p[i]);
+        pred_Y[i] = binomial_rng(n[i] , p[i]);
+    }
+}
+"
+data8 = list(N = nrow(d) , Y = d$y , n = d$n , P = d$P_dummy , V = d$V_dummy , A = d$A_dummy)
+fit8 = stan(model_code = mdl8, data = data8 , cores = 2, chains = 2)
+```
+```{r, message = FALSE, warning=FALSE}
+precis(fit8)
+```
+
+### Q9.
+
+#### a) Interpret the estimators
+
+The intercept $\alpha$ represent the probability of a successful attempt for a pirate when all of the predictors are at zero.
+
+The slope $\beta$ means the amount of effect different variable effect the model. From this model, we can see that "pirate had large body size" has the most positive influence while "victim had large body size" has in most negative influence.
+
+
+#### b) Plot the posterior predictions
+
+```{r, fig.width = 8 , fig.height = 4}
+frame9 = as.data.frame( fit8 , par = "p" )
+
+result9.1 = data.frame(
+  index = 1:8,
+  prob_success = d$y / d$n,
+  p_mean = frame9 %>% apply(., 2, mean),
+  PI_lower = frame9 %>% apply(., 2, HPDI) %>% .[1,],
+  PI_upper = frame9 %>% apply(., 2, HPDI) %>% .[2,]
+) 
+
+result9.2 = data.frame(
+  index = 1:8,
+  success_count = d$y,
+  p_mean = frame9 %>% apply(., 2, mean) * d$n,
+  PI_lower = frame9 %>% apply(., 2, HPDI) %>% .[1,] * d$n,
+  PI_upper = frame9 %>% apply(., 2, HPDI) %>% .[2,] * d$n
+) 
+
+pic9.1 = result9.1 %>% ggplot() +
+  geom_point(aes(x = index, y = prob_success) , size = 1.5 , shape = 21) + 
+  geom_point(aes(x = index, y = p_mean), color = 'blue', size = 1.5 , alpha = 0.7 , shape = 21) +
+  geom_segment(aes(x = index, xend = index, y = PI_lower, yend = PI_upper) , alpha = 0.6) +
+  labs(y = "Successful Proportion", x = "Case" , title = "(1) Probability of Success") +
+  scale_x_continuous(labels = c("1" = "LAL", "2" = "LAS", "3" = "LIL", "4" = "LIS", "5" = "SAL", "6" = "SAS", "7" = "SIL", "8" = "SIS"), breaks = c(1:8))
+
+pic9.2 = result9.2 %>% ggplot() +
+  geom_point(aes(x = index, y = success_count) , size = 1.5 , shape = 21) + 
+  geom_point(aes(x = index, y = p_mean), color = 'blue', size = 1.5 , alpha = 0.7 , shape = 21) +
+  geom_segment(aes(x = index, xend = index, y = PI_lower, yend = PI_upper) , alpha = 0.6) +
+  labs(y = "Successful Counts", x = "Case" , title = "(2) Successful Attempts") +
+  scale_x_continuous(labels = c("1" = "LAL", "2" = "LAS", "3" = "LIL", "4" = "LIS", "5" = "SAL", "6" = "SAS", "7" = "SIL", "8" = "SIS"), breaks = c(1:8))
+
+grid.arrange(pic9.1 , pic9.2 , nrow = 1)
+```
+
+#### c) The difference of two plots
+
+The proportion plot makes the predictor variables more comparable because it ignores the sample size (the number of piracy attempts). On the other hand, the count plot shows the additional uncertainty due to the underlying sample size and it is hard to see the differing probabilities.
+
+### Q10.
+
+#### a) Improve the model
+
+```{r, message = FALSE, results='hide'}
+mdl10 = "
+data {
+    int N;
+    int Y[N];
+    int n[N];
+    int P[N];
+    int V[N];
+    int A[N];
+}
+parameters {
+    real alpha;
+    real bP;
+    real bV;
+    real bA;
+    real bPA;
+}
+transformed parameters {
+    real p[N];
+    for (i in 1:N){
+        p[i] = inv_logit(alpha + bP * P[i] + bV * V[i] + bA * A[i] + bPA * P[i] * A[i]);
+    }
+}
+
+model {
+    Y ~ binomial(n, p);
+    
+    alpha ~ normal(0, 1.5);
+    bP ~ normal(0, 0.5);
+    bV ~ normal(0, 0.5);
+    bA ~ normal(0, 0.5);
+    bPA ~ normal(0, 0.5);
+}
+
+generated quantities {
+    vector[N] log_lik;
+    int pred_Y[N];
+    
+    for (i in 1:N){
+        log_lik[i] = binomial_lpmf(Y[i] | n[i] , p[i]);
+        pred_Y[i] = binomial_rng(n[i] , p[i]);
+    }
+}
+"
+data10 = list(N = nrow(d) , Y = d$y , n = d$n , P = d$P_dummy , V = d$V_dummy , A = d$A_dummy)
+fit10 = stan(model_code = mdl10, data = data10 , cores = 2, chains = 2)
+```
+
+#### b) Compare two models using WAIC
+```{r}
+rethinking::compare(fit8, fit10)
+```
+
+WAIC is smaller when we don't take interactions into considerations, however, the difference is minimal.
