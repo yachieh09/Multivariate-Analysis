@@ -1,0 +1,343 @@
+---
+title: "HW3"
+author: "工管四 B06701235 黃亞婕"
+date: "2021/04/08"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 4
+    number_sections: false
+    toc_float: true
+---
+```{r, message = FALSE, results='hide'}
+library(rstan)
+library(rethinking)
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+```
+
+### Q1.
+
+(1)
+Temperature would lead to an interaction effect. If it is too hot, the yeast will die, on the other hand, if it is too cold, yeast would be inactive.
+
+(2)
+Different field of education can have interaction effect. Some fields can have higher income than others (ex: doctors, lawyers...etc).
+
+(3)
+The quality of the components can have interaction effect. If the car has broken wheels or engine, the car can't go even it has enough gasoline.
+
+### Q2.
+
+(1)
+This invokes an interaction between heat and humidity.
+
+(2)
+There is no interaction since the two conditions are independent. The car can still go faster when it has many cylinders even it doesn't have better fuel injector.
+
+(3)
+There is no interaction. You get your political belief from your either from your parents or friends, it does not interact.
+
+(4)
+There is no interaction between highly social and manipulative appendages. Each of them can respectively predict intelligence. 
+
+### Q3.
+
+(1) Caramelized: $\mu_{i}$ = $\alpha$ + $\beta_{H}H_{i}$ + $\beta_{M}M_{i}$ + $\beta_{HM}H_{i}M_{i}$
+
+(2) Maximum speed: $\mu_{i}$ = $\alpha$ + $\beta_{C}C_{i}$ + $\beta_{F}F_{i}$
+
+(3) Political belief: $\mu_{i}$ = $\alpha$ + $\beta_{P}P_{i}$ + $\beta_{F}F_{i}$
+
+(4) Intelligence: $\mu_{i}$ = $\alpha$ + $\beta_{S}S_{i}$ + $\beta_{M}M_{i}$
+ 
+### Q4.
+
+If none of the flower blooms under the hot temperature, there will be no linear interaction (since linear effect create additive change). However, there is a three-way interaction for the three predictor variables be water, shade and temperature.
+
+### Q5.
+
+Let $L_{i}$ be the ordinary linear model and add a binary variable $H_{i}$ to be a indicator of whether the temperature is hot or not:
+
+$\mu_{i}$ = $L_{i}$(1 − $H_{i}$)
+
+When $H_{i}$ = 1, the model will be zero, which means there will be zero flower blooms.
+
+### Q6.
+
+#### - Assumptions and Plotting
+Ravens ~ Normal ( $\mu$, $\sigma$ ) 
+
+$\mu$ = $\alpha$ + $\beta_{p}Prey$ + $\beta_{w}Wolf$ + $\beta_{pw}Prey * Wolf$
+
+```{r , fig.width = 8 , fig.height = 4}
+N <- 1000
+rPW <- 0.6
+bP <- 0.1
+bW <- 0.3 
+bPW <- 0.5
+
+prey <- rnorm(n = N, mean = 0, sd = 1)
+wolf <- rnorm(n = N, mean = rPW * prey, sd = sqrt(1 - rPW^2))
+raven <- rnorm(n = N, mean = bP * prey + bW * wolf + bPW * prey * wolf, sd = 1)
+
+d6 <- data.frame(prey, raven, wolf)
+
+p6.1 = d6 %>% ggplot() +
+  geom_point(data = d6, aes(prey, raven), alpha = 0.3)+
+  labs(y = "Ravens", x = "Prey", title = "Model 6.1")+
+  theme_bw()
+
+p6.2 = d6 %>% ggplot() +
+  geom_point(data = d6, aes(wolf, raven), alpha = 0.3)+
+  labs(y = "Ravens", x = "Wolf", title = "Model 6.2")+
+  theme_bw()
+
+grid.arrange(p6.1 , p6.2 , nrow = 1)
+```
+
+#### - Intepretation
+From the two plots above we can see the interaction doesn't look like linear, since the amount of prey, wolves and ravens depend on each other. When there is more prey, there will be more predator. Also, the more predator there are, the less prey there is.
+
+### Q7.
+
+#### - Data Processing
+```{r}
+data(tulips)
+d <- tulips
+d$blooms_std <- d$blooms / max(d$blooms) 
+d$water.c <- d$water - mean(d$water)
+d$shade.c <- d$shade - mean(d$shade)
+# Use coerce_index function to construct the index variable: a=1, b=2, c=3
+d$bed_idx <- coerce_index( d$bed )
+```
+
+#### - Model Fitting
+```{r, message = FALSE, results='hide'}
+mdl7.1 = "
+data {
+    int N;
+    vector[N] blooms;
+    vector[N] water;
+    vector[N] shadow;
+    vector[N] idx;
+}
+parameters {
+    real a;
+    real bed;
+    real bw;
+    real bs;
+    real bws;
+    real sigma;
+}
+model {
+    vector[N] mu;
+    
+    for (i in 1:N){
+      mu[i] = a + bed * idx[i] + bw * water[i] + bs * shadow[i] + bws * water[i] * shadow[i];
+    }
+    blooms ~ normal(mu, sigma);
+
+    a ~ normal( 0 , 100 );
+    bed ~ normal( 0 , 100 );
+    bw ~ normal( 0 , 100 );
+    bs ~ normal( 0 , 100 );
+    bws ~ normal( 0 , 100 );
+    sigma ~ uniform( 0,100 );
+}
+generated quantities {
+    vector[N] pred_mu;
+    vector[N] log_lik;
+    
+    for (n in 1:N){
+        pred_mu[n] = a + bed * idx[n] + bw * water[n] + bs * shadow[n] + bws * water[n] * shadow[n]; 
+        log_lik[n] = normal_lpdf(blooms[n] | pred_mu[n], sigma);
+    }
+        
+}
+"
+data7.1 = list(N = nrow(d), blooms = d$blooms_std, water = d$water.c, shadow = d$shade.c, idx = d$bed_idx)
+fit7.1 = stan(model_code = mdl7.1 , data = data7.1 , cores = 2 , chains = 2 , iter = 2000)
+```
+```{r, message = FALSE, warning = FALSE}
+precis(fit7.1)
+```
+
+### Q8.
+
+#### - Model Fitting
+```{r, message = FALSE, results='hide'}
+mdl7.2 = "
+data {
+    int N;
+    vector[N] blooms;
+    vector[N] water;
+    vector[N] shadow;
+}
+parameters {
+    real a;
+    real bw;
+    real bs;
+    real bws;
+    real sigma;
+}
+model {
+    vector[N] mu;
+    mu = a + bw * water + bs * shadow + bws * water .* shadow;
+    blooms ~ normal(mu, sigma);
+
+    a ~ normal( 0 , 100 );
+    bw ~ normal( 0 , 100 );
+    bs ~ normal( 0 , 100 );
+    bws ~ normal( 0 , 100 );
+    sigma ~ uniform( 0,100 );
+}
+generated quantities {
+    vector[N] pred_mu;
+    vector[N] log_lik;
+    
+    
+    for (i in 1:N){
+      pred_mu = a + bw * water + bs * shadow + bws * water .* shadow;
+      log_lik[i] = normal_lpdf(blooms[i] | pred_mu[i], sigma);
+    }
+}
+"
+data7.2 = list(N = nrow(d), blooms = d$blooms_std, water = d$water.c, shadow = d$shade.c)
+fit7.2 = stan(model_code = mdl7.2 , data = data7.2 , cores = 2 , chains = 2 , iter = 2000)
+```
+```{r}
+rethinking::compare(fit7.1, fit7.2)
+```
+
+#### - Intepretaion
+From the table above, we can see that the model with bed is a little bit better using WAIC comparison even though the difference is very small. However, including bed in the model doesn't help much for the prediction. This is because bed is a factorial experiment and there is no correlation between bed and treatment.
+
+### Q9.
+
+#### - Data Processing
+```{r}
+data(rugged)
+d <- rugged
+new_d <- rugged[complete.cases(d$rgdppc_2000), ]
+new_d$log_gdp <- log(new_d$rgdppc_2000)
+new_d$log_gdp_std <- new_d$log_gdp / mean(new_d$log_gdp)
+new_d$rugged_std <- new_d$rugged / max(new_d$rugged)
+```
+
+#### - Model With Seychelles
+```{r, message = FALSE, results='hide'}
+mdl9 = "
+data{
+    int N;
+    vector[N] loggdp;
+    vector[N] rugged;
+    vector[N] cont_africa;
+}
+parameters{
+    real a;
+    real bA;
+    real bR;
+    real bAR;
+    real sigma;
+}
+model{
+    vector[N] mu;
+  
+    for (i in 1:N){
+      mu[i] = a + bA * cont_africa[i] + bR * rugged[i] + bAR * cont_africa[i] * rugged[i];
+     }
+    loggdp ~ normal(mu,sigma);
+  
+    a ~ normal(0,100);
+    bR  ~ normal(0,10);
+    bA  ~ normal(0,10);
+    bAR ~ normal(0,10);
+    sigma ~ uniform(0,50);
+}
+generated quantities {
+    vector[N] mu;
+    
+    for(n in 1:N) {
+      mu[n] = a + bA * cont_africa[n] + bR * rugged[n] + bAR * cont_africa[n] * rugged[n]; 
+  } 
+}
+"
+data9.1 <- list( N = NROW(new_d) , loggdp = new_d$log_gdp , rugged = new_d$rugged_std , cont_africa = new_d$cont_africa)
+fit9.1 = stan(model_code = mdl9, data = data9.1, cores = 2 , chains = 2 , iter = 2000)
+```
+
+#### - Model without Seychelles
+```{r, message = FALSE, results='hide'}
+# Remove Seychelles from the data frame
+dd = new_d %>% filter(country != "Seychelles")
+
+# Fit the Model Again
+data9.2 <- list( N = NROW(dd) , loggdp = dd$log_gdp , rugged = dd$rugged , cont_africa = dd$cont_africa)
+fit9.2 = stan(model_code = mdl9, data = data9.2, cores = 2 , chains = 2 , iter = 2000)
+```
+
+#### - Intepretation
+
+```{r, message = FALSE, warning = FALSE}
+precis(fit9.1)
+precis(fit9.2)
+```
+
+Comparing the 2 models, we can see that the coefficients of the interaction (bAR) is decreased from 2.4 to 0.3 in the model without Seychelles. Removing Seychelles didn’t make the interaction disappear, it only weaken it. 
+
+### Q10.
+
+#### - Plot out two models
+
+```{r, message = FALSE, results='hide', warning = FALSE}
+frame9.1 = as.data.frame(fit9.1)
+frame9.2 = as.data.frame(fit9.2)
+
+pred_mu = frame9.1 %>% 
+  select(contains("mu"))
+
+pred_mu2 = frame9.2 %>% 
+  select(contains("mu"))
+
+PI = data.frame(
+  mean = pred_mu %>% apply(., 2, mean),
+  L_HPDI = pred_mu %>% apply(. , 2 , PI , prob = 0.95) %>% .[1,],
+  H_HPDI = pred_mu %>% apply(. , 2 , PI , prob = 0.95) %>% .[2,],
+  rugged_std = new_d$rugged_std,
+  africa = new_d$cont_africa,
+  log_gdp_std = new_d$log_gdp_std,
+  africa = new_d$cont_africa
+)
+
+pic9.1 = PI %>% ggplot(aes(fill = ifelse(PI$africa == 1, "africa", "else"))) +
+  geom_point(data = new_d, aes(rugged_std, log_gdp), shape=21, stroke=0) +
+  geom_line(aes(rugged_std , mean)) +
+  geom_ribbon(aes(x = rugged_std , ymin = L_HPDI , ymax = H_HPDI), alpha = 0.3) +
+  labs(y = "Log_GDP", x = "Ruggedness", fill="Continent", title = "Model 9.1")
+
+PI2 = data.frame(
+  mean = pred_mu2 %>% apply(., 2, mean),
+  L_HPDI = pred_mu2 %>% apply(. , 2 , PI , prob = 0.95) %>% .[1,],
+  H_HPDI = pred_mu2 %>% apply(. , 2 , PI , prob = 0.95) %>% .[2,],
+  rugged_std = dd$rugged_std,
+  africa = dd$cont_africa,
+  log_gdp_std = dd$log_gdp_std,
+  africa = dd$cont_africa
+)
+
+pic9.2 = PI2 %>% ggplot(aes(fill = ifelse(PI2$africa == 1, "africa", "else"))) +
+  geom_point(data = dd, aes(rugged_std, log_gdp), shape=21, stroke=0) +
+  geom_line(aes(rugged_std , mean)) +
+  geom_ribbon(aes(x = rugged_std , ymin = L_HPDI , ymax = H_HPDI), alpha = 0.3) +
+  labs(y = "Log_GDP", x = "Ruggedness", fill="Continent", title = "Model 9.2")
+```
+```{r, message = FALSE , warning = FALSE, fig.width=10,fig.height=4}
+grid.arrange(pic9.1 , pic9.2 , nrow = 1)
+```
+
+
+#### - Intepretation
+Observe the two plots above, the slope among African nations without Seychelles is smaller and the uncertainty at the higher values of ruggedness is larger. However, the plots show that the interaction is minimal with Seychelles or without it.
