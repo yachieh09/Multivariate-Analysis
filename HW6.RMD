@@ -1,0 +1,529 @@
+---
+title: "HW6"
+author: "工管四 B06701235 黃亞婕"
+date: "2021/05/20"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 5
+    number_sections: false
+    toc_float: true
+---
+```{r, message = FALSE, results='hide'}
+library(rstan)
+library(rethinking)
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(MASS)
+library(loo)
+library(skimr)
+compare = rethinking::compare
+select = dplyr::select
+```
+
+### Q1.
+
+Comparing the standard deviation, (a) will produce more shrinkage in the estimates because the prior is more concentrated.
+
+### Q2.
+
+$y_i \sim Binomial(1, p_i) \\ logit(p_i) = \alpha_{GROUP[i]} + \beta x_i \\ \alpha_{GROUP} \sim Normal(\bar\alpha, \sigma_\alpha) \\ \bar\alpha \sim Normal(0, 1) \\ \sigma_\alpha \sim Exponential(1) \\ \beta \sim Normal(0, 1)$
+
+### Q3.
+```{r}
+data(reedfrogs)
+d <- reedfrogs
+d$pred <- ifelse( d$pred=="no" , 0 , 1 )
+d$big <- ifelse( d$size=="big" , 1 , 0 )
+d$tank <- 1:nrow(d)
+```
+
+#### A) Model
+##### - Tank Only
+```{r, message = FALSE, results='hide'}
+mdl3.1 = "
+data {
+    int N;
+    int D[N];
+    int S[N];
+    int tank[N];
+}
+parameters {
+    real a_bar;
+    real<lower=0> a_sigma;
+    real a[N];
+}
+transformed parameters {
+    real p[N];
+    for (i in 1:N) {
+        p[i] = inv_logit(a[i]);
+    }
+}
+model {
+    for (i in 1:N){
+        S[i] ~ binomial(D[i], p[i]);
+    }
+    a ~ normal(a_bar, a_sigma);
+    a_bar ~ normal(0, 10);
+    a_sigma ~ cauchy(0 , 1);
+}
+generated quantities {
+    real log_lik[N];
+    for (i in 1:N){
+        log_lik[i] = binomial_lpmf(S[i] | D[i], p[i]);
+    }
+}
+"
+data3.1 = list(N = d %>% nrow() , D = d$density , S = d$surv , tank = d$tank)
+fit3.1 = stan(model_code = mdl3.1, data = data3.1, iter = 4000, chains = 2, cores = 2)
+```
+
+##### - Predation
+```{r, message = FALSE, results='hide'}
+mdl3.2 = "
+data {
+    int N;
+    int D[N];
+    int S[N];
+    int tank[N];
+    int pred[N];
+}
+parameters {
+    real a_bar;
+    real<lower=0> a_sigma;
+    real a[N];
+    real bp;
+}
+transformed parameters {
+    real p[N];
+    for (i in 1:N) {
+        p[i] = inv_logit(a[i] + bp * pred[i]);
+    }
+}
+model {
+    for (i in 1:N){
+        S[i] ~ binomial(D[i], p[i]);
+    }
+    a ~ normal(a_bar, a_sigma);
+    a_bar ~ normal(0,10);
+    a_sigma ~ cauchy(0,1);
+    bp ~ normal(0,1);
+}
+generated quantities {
+    real log_lik[N];
+    for (i in 1:N){
+        log_lik[i] = binomial_lpmf(S[i] | D[i], p[i]);
+    }
+}
+"
+data3.2 = list(N = d %>% nrow() , D = d$density , S = d$surv , tank = d$tank , pred = d$pred)
+fit3.2 = stan(model_code = mdl3.2, data = data3.2, iter = 4000, chains = 2, cores = 2)
+```
+##### - Size
+```{r, message = FALSE, results='hide'}
+mdl3.3 = "
+data {
+    int N;
+    int D[N];
+    int S[N];
+    int tank[N];
+    int big[N];
+}
+parameters {
+    real a_bar;
+    real<lower=0> a_sigma;
+    real a[N];
+    real bb;
+}
+transformed parameters {
+    real p[N];
+    for (i in 1:N) {
+        p[i] = inv_logit(a[i] + bb * big[i]);
+    }
+}
+model {
+    for (i in 1:N){
+        S[i] ~ binomial(D[i], p[i]);
+    }
+    a ~ normal(a_bar, a_sigma);
+    a_bar ~ normal(0,10);
+    a_sigma ~ cauchy(0,1);
+    bb ~ normal(0,1);
+}
+generated quantities {
+    real log_lik[N];
+    for (i in 1:N){
+        log_lik[i] = binomial_lpmf(S[i] | D[i], p[i]);
+    }
+}
+"
+data3.3 = list(N = d %>% nrow() , D = d$density , S = d$surv , tank = d$tank , big = d$big)
+fit3.3 = stan(model_code = mdl3.3, data = data3.3, iter = 4000, chains = 2, cores = 2)
+```
+
+##### - Predation & Size
+```{r, message = FALSE, results='hide'}
+mdl3.4 = "
+data {
+    int N;
+    int D[N];
+    int S[N];
+    int tank[N];
+    int pred[N];
+    int big[N];
+}
+parameters {
+    real a_bar;
+    real<lower=0> a_sigma;
+    real a[N];
+    real bp;
+    real bb;
+}
+transformed parameters {
+    real p[N];
+    for (i in 1:N) {
+        p[i] = inv_logit(a[i] + bp * pred[i] + bb * big[i]);
+    }
+}
+model {
+    for (i in 1:N){
+        S[i] ~ binomial(D[i], p[i]);
+    }
+    a ~ normal(a_bar, a_sigma);
+    a_bar ~ normal(0,10);
+    a_sigma ~ cauchy(0,1);
+    bp ~ normal(0,1);
+    bb ~ normal(0,1);
+}
+generated quantities {
+    real log_lik[N];
+    for (i in 1:N){
+        log_lik[i] = binomial_lpmf(S[i] | D[i], p[i]);
+    }
+}
+"
+data3.4 = list(N = d %>% nrow() , D = d$density , S = d$surv , tank = d$tank , pred = d$pred , big = d$big)
+fit3.4 = stan(model_code = mdl3.4, data = data3.4, iter = 4000, chains = 2, cores = 2)
+
+```
+
+##### - Predation & Size with interaction
+```{r, message = FALSE, results='hide'}
+mdl3.5 = "
+data {
+    int N;
+    int D[N];
+    int S[N];
+    int tank[N];
+    int pred[N];
+    int big[N];
+}
+parameters {
+    real a_bar;
+    real<lower=0> a_sigma;
+    real a[N];
+    real bp;
+    real bb;
+    real bpb;
+}
+transformed parameters {
+    real p[N];
+    for (i in 1:N) {
+        p[i] = inv_logit(a[i] + bp * pred[i] + bb * big[i] + bpb * pred[i] * big[i]);
+    }
+}
+model {
+    for (i in 1:N){
+        S[i] ~ binomial(D[i], p[i]);
+    }
+    a ~ normal(a_bar, a_sigma);
+    a_bar ~ normal(0,10);
+    a_sigma ~ cauchy(0,1);
+    bp ~ normal(0,1);
+    bb ~ normal(0,1);
+    bpb ~ normal(0,1);
+}
+generated quantities {
+    real log_lik[N];
+    for (i in 1:N){
+        log_lik[i] = binomial_lpmf(S[i] | D[i], p[i]);
+    }
+}
+"
+data3.5 = list(N = d %>% nrow() , D = d$density , S = d$surv , tank = d$tank , pred = d$pred , big = d$big)
+fit3.5 = stan(model_code = mdl3.5, data = data3.5, iter = 4000, chains = 2, cores = 2)
+```
+
+#### B) Compare and Explain
+```{r}
+coeftab_plot(coeftab(fit3.1, fit3.2, fit3.3 , fit3.4 , fit3.5) , pars = "a_sigma" , labels = c("Tank", "Predation", "Size", "Both Pred and Size", "Interaction"))
+```
+
+From the plot, we can see that whether predation is in the model makes a huge different. On the other hand, the predictor big doesn’t help prediction very much, it has little effect on the estimated variation across tanks. 
+
+Overall, if we add a predictor into the model, the posterior mean variation will decrease across tanks because the predictors relevant to survival and it is predicting. In best case, if we had every relevant predicting variables that determined the survival outcomes, there would be zero variation across tanks.
+
+### Q4.
+```{r}
+compare(fit3.1 , fit3.2 , fit3.3 , fit3.4 , fit3.5)
+```
+
+The models including predation have almost the same WAIC, whereas the model with `big` factor performs the worst. We can conclude that size has minimal effect to the prediction of survival. 
+
+### Q5.
+#### A) Rewrite the model
+```{r, message = FALSE, results='hide' , warning=FALSE}
+mdl5.1 = "
+data {
+    int N;
+    int D[N];
+    int S[N];
+    int tank[N];
+}
+parameters {
+    real a_bar;
+    real<lower=0> a_scale;
+    real a[N];
+}
+transformed parameters {
+    real p[N];
+    for (i in 1:N) {
+        p[i] = inv_logit(a[i]);
+    }
+}
+model {
+    for (i in 1:N){
+        S[i] ~ binomial(D[i], p[i]);
+    }
+    a ~ cauchy(a_bar, a_scale);
+    a_bar ~ normal(0,10);
+    a_scale ~ cauchy(0,1);
+}
+"
+data5.1 = list(N = d %>% nrow() , D = d$density , S = d$surv , tank = d$tank)
+fit5.1 = stan(model_code = mdl5.1, data = data5.1, iter = 3000, chains = 2, cores = 2 ,control=list(adapt_delta=0.99))
+```
+
+#### B) Compare
+```{r}
+frame3.1 = as.data.frame(fit3.1, pars = "a")
+frame5.1 = as.data.frame(fit5.1, pars = "a")
+
+result5.1 = data.frame(
+  a3 = frame3.1 %>% apply(., 2, mean),
+  a5 = frame5.1 %>% apply(., 2, mean)
+)
+
+pic5.1 = result5.1 %>% 
+  ggplot() +
+  geom_point(data = result5.1 , aes(x = a3 , y = a5 ), size = 1.7 , color = "blue", alpha = 0.5) + 
+  geom_abline(intercept = 0 , slope = 1 ) +
+  labs(x = "Gaussian prior" , y = "Cauchy prior" )
+pic5.1
+```
+
+The black line means when the two intercepts are equal in the two models. Most of them have the same intercept except the five points at the right. In the tanks on the right-hand side, all the tadpoles survived the experiment. Gaussian distribution is more concentrated than Cauchy distribution, it cause more shrinkage, which can explain the five extreme points.
+
+### Q6.
+
+$y_i \sim Normal(\mu_i, \sigma) \\ \mu_i = \alpha_{GROUP[i]} + \beta_{GROUP[i]}x_i \\ \begin{bmatrix}\alpha_{GROUP} \\ \beta_{GROUP} \end{bmatrix} \sim MVNormal(\begin{bmatrix}\alpha \\ \beta \end{bmatrix}, S) \\ S = \left\{\begin{matrix}\sigma_{\alpha} & 0 \\  0 & \sigma_{\beta} \end{matrix} \right\} \times \left\{\begin{matrix}1 & \rho \\  \rho & 1 \end{matrix} \right\} \times \left\{\begin{matrix}\sigma_{\alpha} & 0 \\  0 & \sigma_{\beta} \end{matrix} \right\} \\ \alpha \sim Normal(0, 10) \\ \beta \sim Normal(0, 1)  \\ \sigma \sim HalfCauchy(0,2) \\ \sigma_\alpha \sim HalfCauchy(0,2)\\ \sigma_\beta \sim HalfCauchy(0,2)$
+
+### Q7.
+
+We can use investment as example. Large investments tend to grow faster since it has higher baseline. The intercepts have stronger positive associations with slopes.
+
+### Q8.
+
+When there is little variation among clusters, it will be possible for a varying slopes model to have fewer effective parameters. However, it also create more shrinkage of the estimates, constraining the individual varying effect parameters, and be less flexible in fitting the data.
+
+### Q9.
+#### A) Data Processing
+```{r}
+data(bangladesh)
+d <- bangladesh
+d$district_id <- as.integer(as.factor(d$district))
+```
+
+#### B) Model fitting
+```{r, message = FALSE, results='hide' , warning=FALSE}
+mdl9.1 = "
+data{
+    int N;
+    int N_did;
+    int did_id[N];
+    int urban[N];
+    int use_con[N];
+}
+parameters{
+    real alpha[N_did];
+    real beta[N_did];
+    real<lower=0> sigma_did;
+    vector<lower=0>[2] sigma_par; 
+    corr_matrix[2] R;
+    real hyper_alpha;
+    real hyper_beta;
+}
+transformed parameters{
+    vector[2] y[N_did];
+    vector[N] p;
+    matrix[2, 2] Cov;
+    vector[2] Mu; 
+    
+    for (i in 1:N){
+        p[i] = inv_logit(alpha[did_id[i]] + beta[did_id[i]] * urban[i]);
+    }
+    for (j in 1:N_did) {
+        y[j, 1] = alpha[j];
+        y[j, 2] = beta[j];
+    }
+    Mu[1] = hyper_alpha;
+    Mu[2] = hyper_beta;
+    Cov = quad_form_diag(R, sigma_par); 
+}
+model{
+    use_con ~ binomial(1 , p);
+    y ~ multi_normal(Mu, Cov);
+    
+    sigma_did ~ exponential(1);
+    hyper_alpha ~ normal(0, 10);
+    hyper_beta ~ normal(0, 10);
+    R ~ lkj_corr(2);
+    sigma_par ~ exponential(1);
+}
+generated quantities {
+    vector[N] log_lik;
+    for (i in 1:N){
+        log_lik[i] = binomial_lpmf(use_con[i] | 1, p[i]);
+    }
+}
+"
+data9.1 = list(N = d %>% nrow() , N_did = d$district_id %>% n_unique() , use_con = d$use.contraception , urban = d$urban , did_id = d$district_id)
+fit9.1 = stan(model_code = mdl9.1, data = data9.1, chains = 2, cores = 2, iter = 4000)
+```
+
+```{r}
+precis( fit9.1 , pars=c("hyper_alpha","hyper_beta","sigma_par","R") , depth = 3)
+```
+
+From the above coefficient, we can see residence in urban area will increase contraceptive usage. Also, the variation in the slope (`sigma[2]`) of urban across districts is higher than the intercepts (`sigma[1]`).
+
+#### C) Plotting
+
+Now I plot out the mean of the varying effect estimates for both the intercepts and slopes.
+
+```{r , fig.width = 8 , fig.height = 4}
+frame9.1 = as.data.frame(fit9.1 , pars = c("alpha", "beta")) 
+
+result9.1 = data.frame(
+  rural = frame9.1 %>% select(contains("alpha")) %>% apply(2, mean),
+  difference = frame9.1 %>% select(contains("beta")) %>% apply(2, mean)
+) %>% 
+  mutate(urban = rural + difference)
+
+p9.1 = result9.1 %>% ggplot() +
+  geom_abline(intercept = 0 , slope = 1 , linetype = 2 ) +
+  geom_point(aes(rural, urban), color = "blue" , shape = 21) +
+  coord_cartesian(xlim=c(-1.5,1), ylim=c(-1.5, 1))+
+  labs(x = "usage in rural areas", y = "usage in urban areas")
+
+p9.2 = result9.1 %>% ggplot() +
+  geom_point(aes(rural, difference) , color = "blue" , shape = 21) +
+  geom_abline(intercept = 0 , slope = 0 , linetype = 2 ) +
+  labs(x = "usage in rural areas", y = "difference")
+
+grid.arrange(p9.1, p9.2, nrow = 1)
+```
+
+We can conclude that the higher the contraceptive use in rural areas, the smaller the difference with the urban area of the same district. What's more, in districts that rural women use more contraception, urban women also use the similar amount of contraception. However, in districts that urban usage is the highest somehow have lower rural usage.
+
+### Q10.
+#### A) Observe the raw data
+
+First observe the raw data by plotting it out:
+```{r , fig.width = 4 , fig.height = 4}
+data(Oxboys)
+d <- Oxboys
+
+plot( height ~ age , type = "n" , data = d )
+for ( i in 1:26 ) {
+  h <- d$height[ d$Subject == i ]
+  a <- d$age[ d$Subject == i ]
+  lines( a , h , col="blue")
+}
+```
+
+We can see that the average growth rate is around 10 cm.
+
+#### B) Model fitting
+
+Now let's fit the model:
+
+```{r, message = FALSE, results='hide' , warning=FALSE}
+mdl10 = "
+data{
+    int N;
+    int N_sub;
+    int sub_id[N];
+    real age[N];
+    real height[N];
+}
+parameters{
+    real alpha[N_sub];
+    real beta[N_sub];
+    real<lower=0> sigma_sub;
+    vector<lower=0>[2] sigma_par;
+    corr_matrix[2] R;
+    real hyper_alpha;
+    real hyper_beta;
+}
+transformed parameters{
+    vector[2] y[N_sub];
+    vector[2] Mu;
+    matrix[2, 2] Cov; 
+    vector[N] mu_sub;
+
+    for (j in 1:N_sub) {
+        y[j, 1] = alpha[j];
+        y[j, 2] = beta[j];
+    }
+    Mu[1] = hyper_alpha;
+    Mu[2] = hyper_beta;
+    Cov = quad_form_diag(R, sigma_par); 
+    
+    for (i in 1:N){
+        mu_sub[i] = alpha[sub_id[i]] + beta[sub_id[i]] * age[i];
+    }
+}
+model{
+    height ~ normal(mu_sub, sigma_sub);
+    y ~ multi_normal(Mu, Cov);
+    
+    sigma_sub ~ exponential(1);
+    hyper_alpha ~ normal(0, 100);
+    hyper_beta ~ normal(0, 10);
+    R ~ lkj_corr(2);
+    sigma_par ~ exponential(1);
+}
+generated quantities {
+    vector[N] log_lik;
+    for (i in 1:N){
+        log_lik[i] = normal_lpdf(height[i] | mu_sub[i], sigma_sub);
+    }
+}
+"
+data10 = list(N = d %>% nrow() , N_sub = d$Subject %>% n_unique() , sub_id = d$Subject , age = d$age , height = d$height)
+fit10 = stan(model_code = mdl10, data = data10, cores = 2, chains = 2, iter = 4000)
+```
+
+#### C) Interpretation
+
+```{r}
+precis(fit10 , pars = c("hyper_alpha" , "hyper_beta", "sigma_par" , "R") , depth = 3)
+```
+
+From the coefficients, we can see that the average height at the average age is about 149cm and the change in height per unit standard age is 6.5cm. Moreover, 95% of the boys grew about $2 * 6.5 = 13 cm$ , which is similar to the raw data we plot out. 
+
+By looking to the plot and coefficients, The intercepts contribute more to the height among the boys.
+
