@@ -1,0 +1,751 @@
+---
+title: "HW5"
+author: "工管四 B06701235 黃亞婕"
+date: "2021/05/07"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 5
+    number_sections: false
+    toc_float: true
+---
+```{r, message = FALSE, results='hide'}
+library(rstan)
+library(rethinking)
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+library(MASS)
+library(loo)
+library(DMwR)
+compare = rethinking::compare
+```
+
+### Q1.
+
+The difference between ordered categorical variable and unordered categorical variable is that the formal is constrained to discrete values (ex: 1,2,3,4,5) when the distance between the values doesn't mater a lot, while the later is not constrained to the order of the values (ex: colors, product type) when each variable simply represent different outcomes. 
+
+### Q2.
+
+Ordered logistic regression uses a cumulative logit link function. The cumulative logit link means that the linear model is the log-odds of an event or any event of lower ordered value.
+
+### Q3.
+
+If we ignore the zero-inflation, we will underestimate the true rate of events. Zero-inflation means that counts of zero could arise through different process which is not accounted for in the model. It will result in a lower mean rate while thinking such data as single-process count data.
+
+### Q4.
+
+Over-dispersion usually comes from variation in underlying rates across across different sampling units. For example, considering the amount of shoes sold in different shops over a given period of time, the aggregated counts will likely be over-dispersed since the number of shoes sold vary a lot and shops don't share the same average rate of sales.
+
+Under-dispersion shows less variation in the rates than would be expected and is easily seen when sequential observations are directly correlated (autocorrelation). For example, if we observe the amount of shoes sold through time in certaiin time intervals, the result will turn out to be highly autocorrelated and rates are under-dispersed for each store.
+
+### Q5.
+
+```{r}
+n <- c (12 , 36 , 7 , 41) 
+q <- n / sum(n) # calculate the proportion of the sample at each value
+p <- cumsum(q) # the cumulative probability of each value
+log( p / (1 - p) ) 
+```
+
+### Q6.
+
+#### a) Data Preprocessing
+```{r}
+data(Hurricanes)
+d <- Hurricanes
+d$fem_std <- standardize(d$femininity)
+d$min_p_std <- standardize(d$min_pressure)
+d$dam_std <- standardize(d$damage_norm)
+```
+
+#### b) Model 6.1 (femininity as a predictor)
+```{r, message = FALSE, results='hide'}
+mdl6.1 = "
+data {
+	int N;
+	int deaths[N];
+	real fem[N];
+}
+parameters {
+	real<lower=0> alpha;
+	real<lower=0> bf;
+}
+model {
+  real lambda[N];
+  for (i in 1:N) {
+    lambda[i] = alpha + bf * fem[i];
+  }
+	deaths ~ poisson_log(lambda);
+	alpha ~ normal(0, 10);
+	bf ~ normal(0, 1);
+}
+generated quantities {
+	vector[N] log_lik;
+	vector[N] pred_deaths;
+	vector[N] lambda;
+	for (i in 1:N){
+	    lambda[i] = alpha + bf * fem[i];
+	    log_lik[i] = poisson_log_lpmf(deaths[i] | lambda[i]);
+	    pred_deaths[i] = poisson_log_rng(lambda[i]);
+	}
+}
+"
+data6.1 = list(N = nrow(d) , deaths = d$deaths , fem = d$fem_std)
+fit6.1 = stan(model_code = mdl6.1 , data = data6.1 , cores = 2 , chains = 2 , iter = 2000)
+```
+
+```{r, message = FALSE, warning = FALSE}
+precis(fit6.1)
+```
+
+We can see from the above result that there is a positive association between femininity of the hurricane names and deaths.  
+
+
+#### c) Model 6.2 (Intercept-only model)
+
+```{r, message = FALSE, results='hide'}
+mdl6.2 = "
+data {
+	int N;
+	int deaths[N];
+}
+parameters {
+	real<lower=0> alpha;
+}
+model {
+  real lambda[N];
+  for (i in 1:N) {
+    lambda[i] = alpha;
+  }
+	deaths ~ poisson_log(lambda);
+	alpha ~ normal(0, 10);
+}
+generated quantities {
+	vector[N] log_lik;
+	vector[N] pred_deaths;
+	vector[N] lambda;
+	for (i in 1:N){
+	    lambda[i] = alpha;
+	    log_lik[i] = poisson_log_lpmf(deaths[i] | lambda[i]);
+	    pred_deaths[i] = poisson_log_rng(lambda[i]);
+	}
+}
+"
+data6.2 = list(N = nrow(d) , deaths = d$deaths)
+fit6.2 = stan(model_code = mdl6.2 , data = data6.2 , cores = 2 , chains = 2 , iter = 2000)
+```
+
+#### d) Plot and compare the two models
+
+```{r}
+frame6 = as.data.frame( fit6.1 , par = "pred_deaths")
+
+result6 = data.frame(
+  pred_deaths = frame6 %>% apply(., 2, mean),
+  PI_lower = frame6 %>% apply(., 2, HPDI) %>% .[1,],
+  PI_upper = frame6 %>% apply(., 2, HPDI) %>% .[2,],
+  fem_std = d$fem_std
+)
+pic6 = result6 %>% ggplot() +
+  geom_point(data = d , aes(x = fem_std, y = deaths) , size = 1.5 , shape = 21) + 
+  geom_line(aes(fem_std , pred_deaths))+
+  geom_ribbon(aes(fem_std , ymin = PI_lower, ymax = PI_upper), alpha = 0.2)+
+  labs(x = "Femininity" , y = "Deaths" , title = "Model 6.1")
+
+pic6
+```
+
+```{r}
+compare(fit6.1, fit6.2)
+```
+
+#### e) Interpret
+
+From the plot and the WAIC of the two models, we can see that the model that includes femininity of names performs better and femininity has very little variation in deaths. 
+
+Also, this model is over-dispersion, therefore, this Poisson model does a poor job since most of the hurricanes in the sample lie outside the prediction interval.
+
+### Q7.
+
+#### a) Model Fitting
+```{r, message = FALSE, results='hide', warning = FALSE}
+mdl7.1 = "
+data {
+	int N;
+	int deaths[N];
+	real fem[N];
+}
+parameters {
+	real<lower=0> alpha;
+	real bf;
+	real<lower=0> phi;
+}
+model {
+  real lambda[N];
+  for (i in 1:N) {
+    lambda[i] = alpha + bf * fem[i];
+  }
+	deaths ~ neg_binomial_2_log(lambda, phi);
+	alpha ~ normal(0, 10);
+	bf ~ normal(0, 1);
+	phi ~ cauchy(0, 1);
+}
+generated quantities {
+	vector[N] log_lik;
+	vector[N] pred_deaths;
+	vector[N] lambda;
+	
+	for (i in 1:N){
+	    lambda[i] = alpha + bf * fem[i];
+	    log_lik[i] = neg_binomial_2_log_lpmf(deaths[i] | lambda[i], phi);
+	    pred_deaths[i] = neg_binomial_2_log_rng(lambda[i], phi);
+	}
+}
+"
+data7.1 = list(N = nrow(d) , deaths = d$deaths , fem = d$fem_std)
+fit7.1 = stan(model_code = mdl7.1 , data = data7.1 , cores = 2 , chains = 2 , iter = 2000)
+```
+
+```{r, message = FALSE, warning = FALSE}
+precis(fit7.1)
+```
+
+We can see that the 89% prediction interval is overlapping zero.
+
+#### b) Compare the two models
+
+```{r}
+compare(fit6.1, fit7.1)
+```
+
+We can see that model using gamma-Poisson did fit the data better, however, the number of effective is bigger in Model 7.1 which means it is more prone to overfitting.  
+
+
+#### c) Plot out the model
+
+```{r, fig.width = 8 , fig.height = 4}
+frame7.1 = as.data.frame( fit7.1 , par = "pred_deaths")
+
+result7 = data.frame(
+  pred_deaths = frame7.1 %>% apply(., 2, mean),
+  PI_lower = frame7.1 %>% apply(., 2, HPDI) %>% .[1,],
+  PI_upper = frame7.1 %>% apply(., 2, HPDI) %>% .[2,],
+  fem_std = d$fem_std
+)
+
+pic7 = result7 %>% ggplot() +
+  geom_point(data = d , aes(x = fem_std, y = deaths) , size = 1.5 , shape = 21) + 
+  geom_line(aes(fem_std , pred_deaths))+
+  geom_ribbon(aes(fem_std , ymin = PI_lower, ymax = PI_upper), alpha = 0.2)+
+  labs(x = "Femininity" , y = "Deaths" , title = "Model 7.1")
+
+grid.arrange(pic6, pic7, nrow=1)
+```
+
+Comparing the two plots, we can see that the femininity shows a weaker association with deaths in the gamma-Poisson model. The uncertainty of our model still means it perform really bad and the 89% prediction interval is overlapping zero.
+
+The gamma distribution allows death rate to be calculated for each outcome rather than one overall death rate for all hurricanes. Because more distinct values of `alpha` and `bf` can be consistent with the data, we create wider posterior distributions. 
+
+### Q8.
+
+#### A)  Min_pressure & Femininity
+##### 1. Interaction Model
+
+Use `Gamma-Poisson models` to see the interaction between `femininity` and `min_pressure`:
+
+```{r, message = FALSE, results='hide' , warning=FALSE}
+mdl8.1 = "
+data {
+	int N;
+	int deaths[N];
+	real fem[N];
+	real min_p[N];
+}
+parameters {
+	real<lower=0> alpha;
+	real bf;
+	real bp;
+	real bfp;
+	real<lower=0> phi;
+}
+model {
+    real lambda[N];
+    for (i in 1:N) {
+      lambda[i] = alpha + bf * fem[i] + bp * min_p[i] + bfp * fem[i] * min_p[i];
+      }
+    deaths ~ neg_binomial_2_log(lambda, phi);
+    alpha ~ normal(0, 10);
+    bf ~ normal(0, 1);
+    bp ~ normal(0, 1);
+    bfp ~ normal(0, 1);
+    phi ~ cauchy(0, 1);
+}
+generated quantities {
+	vector[N] log_lik;
+	vector[N] lambda;
+	
+	for (i in 1:N){
+	    lambda[i] = alpha + bf * fem[i] + bp * min_p[i] + bfp * fem[i] * min_p[i];
+	    log_lik[i] = neg_binomial_2_log_lpmf(deaths[i] | lambda[i], phi);
+	}
+}
+"
+data8.1 = list(N = nrow(d) , deaths = d$deaths , fem = d$fem_std , min_p = d$min_p_std)
+fit8.1 = stan(model_code = mdl8.1 , data = data8.1 , cores = 2 , chains = 2 , iter = 2000)
+```
+
+##### 2. Without interaction model
+
+Refit the model without the interaction, only the two main effects.
+```{r, message = FALSE, results='hide', warning=FALSE}
+mdl8.1u = "
+data {
+	int N;
+	int deaths[N];
+	real fem[N];
+	real min_p[N];
+}
+parameters {
+	real<lower=0> alpha;
+	real bf;
+	real bp;
+	real<lower=0> phi;
+}
+model {
+    real lambda[N];
+    for (i in 1:N) {
+      lambda[i] = alpha + bf * fem[i] + bp * min_p[i];
+    }
+    deaths ~ neg_binomial_2_log(lambda, phi);
+    alpha ~ normal(0, 10);
+    bf ~ normal(0, 1);
+    bp ~ normal(0, 1);
+    phi ~ cauchy(0, 1);
+}
+generated quantities {
+	vector[N] log_lik;
+	vector[N] lambda;
+	
+	for (i in 1:N){
+	    lambda[i] = alpha + bf * fem[i] + bp * min_p[i];
+	    log_lik[i] = neg_binomial_2_log_lpmf(deaths[i] | lambda[i], phi);
+	}
+}
+"
+data8.1u = list(N = nrow(d) , deaths = d$deaths , fem = d$fem_std , min_p = d$min_p_std)
+fit8.1u = stan(model_code = mdl8.1u , data = data8.1u , cores = 2 , chains = 2 , iter = 2000)
+```
+
+##### 3. Compare and plot out the results
+
+```{r}
+compare(fit8.1, fit8.1u)
+```
+Comparing the two using WAIC, the model with interaction is a little bit more supportive. Let's take a more detail look to this model.
+
+```{r, message = FALSE, warning = FALSE}
+precis(fit8.1)
+```
+
+From the interaction model, we can see the coefficient `bp` is negative, it is true while the storms with larger minimum pressure indeed cause fewer deaths. 
+
+```{r}
+frame8.1 = as.data.frame( fit8.1 , par = "lambda")
+
+result8.1 = data.frame(
+  pred_deaths = frame8.1 %>% apply(., 2, mean),
+  PI_lower = frame8.1 %>% apply(., 2, PI) %>% .[1,],
+  PI_upper = frame8.1 %>% apply(., 2, PI) %>% .[2,],
+  fem_std = d$fem_std,
+  min_p_std = d$min_p_std,
+  female = d$female
+)
+
+pic8.1 = result8.1 %>% 
+  ggplot(aes(fill = ifelse(female == 1, "female", "male"))) +
+  geom_point(data = d , aes(x = min_p_std, y = sqrt(deaths)) , size = 1.5 , shape = 21) + 
+  geom_ribbon(aes(min_p_std , ymin = PI_lower, ymax = PI_upper), alpha = 0.3)+
+  geom_smooth(aes(min_p_std , pred_deaths) , method = "lm" , formula = y ~ x , size = 0.5 , se=FALSE)+
+  labs(x = "Minimum Pressure (std)" , y = "Deaths(sqrt)" , fill = "Gender", title = "Model 8.1")
+pic8.1
+```
+
+From the plot, we see the interaction model expects feminine storms cause more deaths, but the difference between masculine and feminine storms is bigger as pressure increase. This doesn't match with our hypothesis.
+
+#### B)  Damage_norm & Femininity
+
+##### 1. Interaction Model
+
+Use `Gamma-Poisson model` to see the interaction between `femininity` and `damage_norm`:
+```{r, message = FALSE, results='hide', warning=FALSE}
+mdl8.2 = "
+data {
+	int N;
+	int deaths[N];
+	real fem[N];
+	real dam[N];
+}
+parameters {
+	real<lower=0> alpha;
+	real bf;
+	real bd;
+	real bfd;
+	real<lower=0> phi;
+}
+model {
+    real lambda[N];
+    for (i in 1:N) {
+      lambda[i] = alpha + bf * fem[i] + bd * dam[i] + bfd * fem[i] * dam[i];
+      }
+    deaths ~ neg_binomial_2_log(lambda, phi);
+    alpha ~ normal(0, 10);
+    bf ~ normal(0, 1);
+    bd ~ normal(0, 1);
+    bfd ~ normal(0, 1);
+    phi ~ cauchy(0, 1);
+}
+generated quantities {
+	vector[N] log_lik;
+	vector[N] lambda;
+	
+	for (i in 1:N){
+	    lambda[i] = alpha + bf * fem[i] + bd * dam[i] + bfd * fem[i] * dam[i];
+	    log_lik[i] = neg_binomial_2_log_lpmf(deaths[i] | lambda[i], phi);
+	}
+}
+"
+data8.2 = list(N = nrow(d) , deaths = d$deaths , fem = d$fem_std , dam = d$dam_std)
+fit8.2 = stan(model_code = mdl8.2 , data = data8.2 , cores = 2 , chains = 2 , iter = 2000)
+```
+
+##### 2. Without interaction model
+
+Again, fit a model with only the two main effects:
+```{r, message = FALSE, results='hide' , warning=FALSE}
+mdl8.2u = "
+data {
+	int N;
+	int deaths[N];
+	real fem[N];
+	real dam[N];
+}
+parameters {
+	real<lower=0> alpha;
+	real bf;
+	real bd;
+	real<lower=0> phi;
+}
+model {
+    real lambda[N];
+    for (i in 1:N) {
+      lambda[i] = alpha + bf * fem[i] + bd * dam[i];
+    }
+    deaths ~ neg_binomial_2_log(lambda, phi);
+    alpha ~ normal(0, 10);
+    bf ~ normal(0, 1);
+    bd ~ normal(0, 1);
+    phi ~ cauchy(0, 1);
+}
+generated quantities {
+	vector[N] log_lik;
+	vector[N] lambda;
+	
+	for (i in 1:N){
+	    lambda[i] = alpha + bf * fem[i] + bd * dam[i];
+	    log_lik[i] = neg_binomial_2_log_lpmf(deaths[i] | lambda[i], phi);
+	}
+}
+"
+data8.2u = list(N = nrow(d) , deaths = d$deaths , fem = d$fem_std , dam = d$dam_std)
+fit8.2u = stan(model_code = mdl8.2u , data = data8.2u , cores = 2 , chains = 2 , iter = 2000)
+```
+
+##### 3. Compare and plot out the result
+
+```{r}
+compare(fit8.2, fit8.2u)
+```
+
+Looking at the above comparison, the interaction is still not so significant.
+
+```{r, message = FALSE, warning = FALSE}
+precis(fit8.2)
+```
+
+From the coefficient we can observe that the interaction effect is really small. Now we plot out the model.
+
+```{r}
+frame8.2 = as.data.frame( fit8.2 , par = "lambda")
+
+result8.2 = data.frame(
+  pred_deaths = frame8.2 %>% apply(., 2, mean),
+  PI_lower = frame8.2 %>% apply(., 2, PI) %>% .[1,],
+  PI_upper = frame8.2 %>% apply(., 2, PI) %>% .[2,],
+  fem_std = d$fem_std,
+  dam_std = d$dam_std,
+  female = d$female
+)
+
+pic8.2 = result8.2 %>% 
+  ggplot(aes(fill = ifelse(female == 1, "female", "male"))) +
+  geom_point(data = d , aes(x = dam_std, y = sqrt(deaths)) , size = 1.5 , shape = 21) + 
+  geom_line(aes(dam_std , pred_deaths)) +
+  geom_ribbon(aes(dam_std , ymin = PI_lower, ymax = PI_upper), alpha = 0.3)+
+  labs(x = "Damage_norm (std)" , y = "Deaths" , fill = "Gender", title = "Model 8.2")
+pic8.2
+```
+
+We can see that feminine storms truly are more deadly than other hurricanes and the difference grows with damage. The effect sizes is inplausible, however, that there isn't much statistical evidence for the interaction.
+
+### Q9.
+
+#### a) Model Fitting
+##### 1. Interactions
+```{r, message = FALSE, results='hide' , warning=FALSE}
+d = d %>% 
+  mutate(dam_norm_std = scale(log(damage_norm))[,1],
+         female_id = female %>% as.integer())
+
+test_Hurricane = data.frame(
+  dam_std = c(-3.5,seq(-3.1, 2, length.out = 99)),
+  dam = c(-3.5,seq(-3.1, 2, length.out = 99)) %>% 
+    unscale(., scale(log(d$damage_norm))) %>% 
+    .[,1] %>% exp() %>% 
+    rep(., 2),
+  female_id = c(rep(1, 100), rep(0, 100)),
+  female = c(rep("1", 100),rep("0", 100))
+)
+
+mdl9.1 = "
+data {
+    int N;
+    int deaths[N];
+    int fem[N];
+    real dam[N];
+    
+    int test_N;
+    real test_dam[test_N];
+    int test_female[test_N];
+}
+parameters {
+    real<lower=0> alpha;
+    real bf;
+    real bd;
+    real bfd;
+    real<lower=0> phi;
+}
+
+transformed parameters {
+    real lambda[N];
+    for (i in 1:N){
+        lambda[i] = alpha + bf * fem[i] + bd * dam[i] + bfd * fem[i] * dam[i];
+    }
+}
+
+model {
+    deaths ~ neg_binomial_2_log(lambda, phi);
+    alpha ~ normal(0, 10);
+    bf ~ normal(0, 1);
+    bd ~ normal(0, 1);
+    bfd ~ normal(0, 1);
+    phi ~ cauchy(0, 1);
+}
+generated quantities {
+    real log_lik[N];
+    real pred_lambda[test_N];
+    
+    for (i in 1:N){
+      log_lik[i] = neg_binomial_2_log_lpmf(deaths[i] | lambda[i], phi);
+    }
+    
+    for (i in 1:test_N){
+      pred_lambda[i] = alpha + bf * test_female[i] + bd * test_dam[i] + bfd * test_female[i] * test_dam[i];
+    }
+}
+"
+
+data9.1 = list( N = nrow(d) , dam = d$dam_norm_std , fem = d$female_id , deaths = d$deaths , test_N = nrow(test_Hurricane) , test_dam = test_Hurricane$dam , test_female = test_Hurricane$female_id %>% as.integer() )
+
+fit9.1 = stan(model_code = mdl9.1 , data = data9.1 , cores = 2, chains = 2, iter = 2000)
+```
+
+##### 2. Without interactions
+
+```{r, message = FALSE, results='hide', warning=FALSE}
+mdl9.2 = "
+data {
+    int N;
+    int deaths[N];
+    int fem[N];
+    real dam[N];
+    
+    int test_N;
+    real test_dam[test_N];
+    int test_female[test_N];
+}
+parameters {
+    real<lower=0> alpha;
+    real bf;
+    real bd;
+    real<lower=0> phi;
+}
+transformed parameters {
+    real lambda[N];
+    for (i in 1:N){
+        lambda[i] = alpha + bf * fem[i] + bd * dam[i];
+    }
+}
+model {
+    deaths ~ neg_binomial_2_log(lambda, phi);
+    alpha ~ normal(0, 10);
+    bf ~ normal(0, 1);
+    bd ~ normal(0, 1);
+    phi ~ cauchy(0, 1);
+}
+generated quantities {
+    real log_lik[N];
+    real pred_lambda[test_N];
+    
+    for (i in 1:N){
+      log_lik[i] = neg_binomial_2_log_lpmf(deaths[i] | lambda[i], phi);
+    }
+    for (i in 1:test_N){
+      pred_lambda[i] = alpha + bf * test_female[i] + bd * test_dam[i];
+    }
+}
+"
+data9.2 = list( N = nrow(d) , dam = d$dam_norm_std , fem = d$female_id , deaths = d$deaths , test_N = nrow(test_Hurricane) , test_dam = test_Hurricane$dam , test_female = test_Hurricane$female_id %>% as.integer() )
+
+fit9.2 = stan(model_code = mdl9.2 , data = data9.2 , cores = 2, chains = 2, iter = 2000)
+
+```
+
+#### c) Compare and plotting
+
+```{r}
+compare(fit8.2 , fit8.2u , fit9.1 , fit9.2)
+```
+
+The log-damage models are performing better than the two other models and the interaction model stands out. Let us take a more detail look to the coefficients.
+
+```{r, message = FALSE, warning = FALSE}
+precis(fit9.1)
+```
+
+The effect of femininity is smaller than other two coefficients and the interaction is positive as well. Now plot out the model:
+
+```{r}
+frame9.1 = as.data.frame(fit9.1, pars = "pred_lambda")
+result9.1 = data.frame(
+  pred_deaths = frame9.1 %>% apply(., 2, mean),
+  PI_lower = frame9.1 %>% apply(., 2, PI) %>% .[1,],
+  PI_upper = frame9.1 %>% apply(., 2, PI) %>% .[2,],
+  dam_std = test_Hurricane$dam_std,
+  female = test_Hurricane$female
+)
+result9.1$sqrt_PI_lower ='^'(result9.1$PI_lower,1/2)
+result9.1$sqrt_PI_upper ='^'(result9.1$PI_upper,1/2)
+
+pic9.1 = result9.1 %>% 
+  ggplot(aes(fill = ifelse(female == 1, "female", "male"))) +
+  geom_point(data = d , aes(x = dam_norm_std, y = deaths) , size = 1.5 , shape = 21) + 
+  geom_line(aes(dam_std , sqrt(pred_deaths))) +
+  geom_ribbon(aes(dam_std , ymin = sqrt_PI_lower, ymax = sqrt_PI_upper), alpha = 0.3)+
+  labs(x = "Damage_norm" , y = "Deaths" , fill = "Gender", title = "Model 9.1")
+pic9.1
+```
+
+The model fits better and there is difference between masculine and feminine storms only at the highest damage, otherwise the same. The feminine storms seem to do more damage on average.
+
+### Q10.
+#### a) Model Fitting
+
+```{r, message = FALSE, results='hide', warning = FALSE}
+data(Fish)
+d <- Fish
+d$loghours <- log(d$hours)
+
+mdl10 = "
+data {
+    int N;
+    int y[N];
+    int persons[N];
+    int child[N];
+    int livebait[N];
+    real loghours[N];
+    int camper[N];
+}
+parameters {
+    real alpha_p;
+    real alpha_lambda;
+    real bCam0;
+    real bc0;
+    real bp;
+    real bc;
+    real bb;
+    real bl;
+}
+transformed parameters {
+    real p[N];
+    real lambda[N];
+    for (i in 1:N){
+      p[i] = inv_logit(alpha_p + bCam0 * camper[i] + bc0 * child[i]);
+      lambda[i]= exp(alpha_lambda + bb * livebait[i] + bp * persons[i] + bc * child[i] + bl * loghours[i]);
+    }
+}
+model {
+    for (i in 1:N){
+        if( y[i] == 0 ) target += log_mix(p[i], 0, poisson_lpmf(0 | lambda[i]));
+        if( y[i] > 0 ) target += log1m(p[i]) + poisson_lpmf(y[i] | lambda[i]);
+    }
+    alpha_p ~ normal(0, 10);
+    alpha_lambda ~ normal(0, 10);
+    bCam0 ~ normal(0, 1);
+    bc0 ~ normal(0, 1);
+    bp ~ normal(0, 1);
+    bc ~ normal(0, 1);
+    bb ~ normal(0, 1);
+    bl ~ normal(0, 1);
+}
+generated quantities {
+    real log_lik[N];
+    for (i in 1:N){
+        if ( y[i] == 0 )log_lik[i] = log_mix(p[i], 0, poisson_lpmf(0 | lambda[i]));
+        if ( y[i] > 0 ) log_lik[i] = log1m(p[i]) + poisson_lpmf(y[i] | lambda[i]);
+    }
+}
+"
+data10 = list(N = nrow(d) , y = d$fish_caught , persons = d$persons , child = d$child , loghours = d$loghours , livebait = d$livebait , camper = d$camper)
+fit10 = stan(model_code = mdl10, data = data10 , iter = 2000 , cores = 2, chains = 2)
+```
+
+```{r, message = FALSE, warning = FALSE}
+precis(fit10)
+```
+
+From the above coefficient, we can have the following interpretation and they all make sense.
+
+* `alpha_p` : 由 `alpha_p = logit(p) ` 可推算出 p (不去釣魚的機率) 大約為 `0.36`，故大家仍是喜歡到公園釣魚的。
+* `alpha_lambda` : 此為一個成年人在沒有使用 livebait 的情況下，約可釣到 0.09 隻。（由 `log(lambda) = alpha_lambda` 計算）
+* `bCam0` : Campers 較常來釣魚。
+* `bc0` : 小孩去公園釣魚的機率較成年人來得低。
+* `bp` : 一同到公園的人越多，釣到的魚越多。
+* `bc` : 小孩釣魚的數量比成年人來得少。
+* `bb` : 使用 livebait可以提高釣魚的數目。
+* `bl` : 在公園停留的時間越久，釣到的魚數目越多（較長時間在釣魚）。
+
+#### b) Plotting
+
+```{r, message = FALSE, warning = FALSE}
+N = 1e4
+d_fish = data.frame( p = rbinom(N , 1 , prob = inv_logit(precis(fit10)[1, 1])) )
+d_fish$catch = (1 - d_fish$p) * rpois( N , 1 )
+
+ggplot() +
+  geom_histogram(data = d_fish, aes(catch), fill="blue" , bins = 30 ) +
+  geom_histogram(data = d_fish %>% filter(p == 0), aes(catch), bins = 30)+
+  labs(x = "Frequency" , y = "Catch" , title = "Model 10")
+```
+
